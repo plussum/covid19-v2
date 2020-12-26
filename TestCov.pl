@@ -11,9 +11,9 @@
 #	-delete_data  : Delete all datas from @MASTER_DEFS and @RECORD_DEFS
 #	-load_master  : Load Master (This may default, not yet)
 #	-reform_csv   : Reform data srouce format fit to this program
-#	-load_csv	  : load (reformed ) csv to @RECORD_DEFS
+#	-insert_csv	  : load (reformed ) csv to @RECORD_DEFS
 #
-#	./TestCov.pl -create_table -build_master
+#	./TestCov.pl -create_table -build_master -reform_csv -insert_csv
 #	./TestCov.pl --reform_csv CCSE-NC
 #
 #
@@ -23,6 +23,7 @@ use DBI;
 use Data::Dumper;
 
 use config;
+use dbinfo;
 use dp;
 
 my $DEBUG = 0;
@@ -30,31 +31,37 @@ my $VERBOSE = 0;
 my $SEARCH_KEY = "";
 my $DISP_LINES = 50;
 
-my $QUERY = 1;
-
-my $DB_NAME = "TestCov";
-my $dsn = "dbi:mysql:database=$DB_NAME;host=localhost;port=3306";
-my $user = 'cov19';
-my $password  = $config::DB_PASSWORD;
+#
+#	Set Database Parameter for connect
+#
+my $DB_NAME = $dbinfo::DB_NAME;
+my $password  = $dbinfo::DB_PASSWORD;
+my $user = $dbinfo::DB_USER;
+my $port = $dbinfo::DB_PORT;
+my $dsn = "dbi:mysql:database=$DB_NAME;host=localhost;port=$port";
 
 my %AreaInfo = ();
 my %DataSource = ();
 my %DataKind = ();
 my @MASTER_DEFS  = (
 	{table_name => "AreaInfo",   hash => \%AreaInfo, csvf => "$config::WIN_PATH/pop.csv",
-			columns => "AreaID INTEGER, AreaName VARCHAR(64), Population INTEGER", }, 
+			columns => "AreaID PRIMARY KEY INTEGER, AreaName VARCHAR(64), Population INTEGER", }, 
 	{table_name => "DataSource", hash => \%DataSource, csvf => "DataSource.csv",
-			columns => "SourceID INTEGER, SourceName CHAR(32), SoruceFullName VARCHAR(256)", },
+			columns => "SourceID INTEGER, SourceName CHAR(8), SoruceFullName VARCHAR(256)", },
 	{table_name => "DataKind",   hash => \%DataKind, csvf => "DataKind.csv",
 			columns => "KindID INTEGER, KindName CHAR(32), KindFullName VARCHAR(256)", },
 );
 my @RECORD_DEFS = (
 	{record_name => "CCSE-NC", table_name => "RawRecord", csvf => "testdb.csv", csv_src => "$config::CSV_PATH/time_series_covid19_confirmed_global.csv",
-		columns => "RecordNo INTEGER, Date DATE, SourceID CHAR(4), KIND CHAR(4),AreaID SMALLINT UNSIGNED, Count INTEGER, AVR7 INTEGER",
+		columns => "RecordNo INTEGER, Date DATE, Source CHAR(8), Kind CHAR(4),AreaID SMALLINT UNSIGNED, Count INTEGER, Avr7 INTEGER",
+		select => "SELECT Date Source Kind  AreaInfo.AreaName Count Avr7 FROM RawRecord, AreaInfo WHERE RawRecird.AreID=AreaInfo.AreaID",
 		source => "ccse", kind => "NC", comvert => \&comv_ccse,
 	},
 );
 
+my @QUERY_DATA = (
+	{query => "SELECT * FROM RawRecord WHERE AreaInfo WHERE RawRecird.AreID=AreaInfo.AreName"},
+);
 
 #
 #	Command Line Paramerts
@@ -63,7 +70,7 @@ my @RECORD_DEFS = (
 #	--params : set PARASMS{$_} = $ARGV[+1];
 #
 #
-my @PARAM_NAMES_LIST = qw(create_table delete_data build_master load_master reform_csv load_csv verbose debug);
+my @PARAM_NAMES_LIST = qw(create_table delete_data build_master load_master reform_csv insert_csv select verbose debug);
 my %PARAM_NAMES = ();
 foreach my $k (@PARAM_NAMES_LIST){
 	$PARAM_NAMES{$k} = 1;
@@ -93,7 +100,7 @@ for(my $i = 0; $i <= $#ARGV; $i++){
 			dp::dp "Unkown parameter -$_\n";
 			exit;
 		}
-		$PARAMS{$_} = 1;
+		$PARAMS{$_} = "";
 	}
 	if(/ccse/){
 		&comb_ccse();
@@ -105,14 +112,14 @@ for(my $i = 0; $i <= $#ARGV; $i++){
 	}
 }
 
-dp::dp %PARAMS . "\n";
+dp::dp %PARAMS . "\n" if($DEBUG);
 if((keys %PARAMS) <= 0){
 	print "usage: $0 " . join(" | ", @PARAM_NAMES_LIST) . "\n";
 	exit;
 }
 
 foreach my $k (keys %PARAMS){
-	print "PARAMS: $k = $PARAMS{$k} \n";
+	dp::dp "PARAMS: $k = $PARAMS{$k} \n" if($DEBUG);
 }
 
 if(defined $PARAMS{verbose}){
@@ -124,7 +131,6 @@ if(defined $PARAMS{debug}){
 }
 	
 
-
 #
 #	Connect to Database
 #
@@ -132,13 +138,14 @@ my $dbh = DBI->connect($dsn, $user, $password, {RaiseError => 0, AutoCommit =>0}
 #my $dbh = DBI->connect($dsn, $user, $password ) || die $DBI::errstr;
 &DO($dbh, 0, "USE $DB_NAME");
 
+
 #
 #	Remove All Data for test
 #
 my $pname = "delete_data";
-if($PARAMS{$pname}){
+if(defined $PARAMS{$pname}){
 	foreach my $p (@MASTER_DEFS, @RECORD_DEFS){
-		next if(defined $PARAMS{$pname} ne "" && $PARAMS{$pname} ne $p->{table_name});
+		next if($PARAMS{$pname} && $PARAMS{$pname} ne $p->{table_name});
 
 		&DO($dbh, 0, qq{DELETE FROM $p->{table_name};});
 	}
@@ -151,7 +158,7 @@ $pname = "create_table";
 if($PARAMS{$pname}){
 	&DO($dbh,1, "show tables;");
 	foreach my $p (@MASTER_DEFS, @RECORD_DEFS){
-		next if($PARAMS{$pname} != 1 && $PARAMS{$pname} ne $p->{table_name});
+		next if($PARAMS{$pname} && $PARAMS{$pname} ne $p->{table_name});
 
 		&DO($dbh, 0, "DROP TABLE IF EXISTS $p->{table_name}");
 		&DO($dbh, 0, "CREATE TABLE $p->{table_name} ($p->{columns})");
@@ -169,83 +176,81 @@ if($PARAMS{$pname}){
 #$dbh->do(qq{INSERT INTO  $TABLE_NAME VALUES (1, "名古屋", 12345) });
 
 #
-#	Insert data from pop.csv
+#	Insert Master Data 
 #
 $pname = "build_master";
 if(defined $PARAMS{$pname}){
 	foreach my $p (@MASTER_DEFS){
-		next if($PARAMS{$pname} != 1 && $PARAMS{$pname} ne $p->{table_name});
+		next if($PARAMS{$pname} && $PARAMS{$pname} ne $p->{table_name});
 
-		my $SNO = 0;
-		my @vals = ();
-		
-		my @strs = ();
-		my @cl = split(/\s*,\s*/, $p->{columns});
-		for(my $i = 0; $i <= $#cl; $i++){
-			dp::dp "[$cl[$i]]\n" if($DEBUG > 1);
-			push(@strs, $i) if($cl[$i] =~ /CHAR/i);
-		}
-		dp::dp "STRS: " . join(",", @strs) . "\n";
-		dp::dp "CSV_FILE : $p->{csvf} \n";
-
-		open(FD, $p->{csvf}) || die "Cannot open $p->{csvf}";
-		my $balk = 10;
-		<FD>;
-		while(<FD>){
-			$SNO++;
-			# last if($SNO > 100);
-
-			s/[\r\n]+$//;
-			my @w = split(/,/, $_);
-			if($#w <= 0){
-				dp::dp "Error?: " . $#w . "; $_   $p->{csvf}\n";
-				next;
-			}
-			foreach my $i (@strs){
-				$w[$i-1] = qq{"$w[$i-1]"} // '""';		# val -> "val" for Charcter
-			}
-			my $vs = join(", ", $SNO, @w);
-			dp::dp "[$vs]\n" if($DEBUG > 1);
-			push(@vals,  "($vs)");
-			#my $sql_str = qq{INSERT INTO  $TABLE_NAME VALUES ($SNO, "$name", $pop) } ;
-			#push(@vals,  qq{($SNO, "$name", $pop)});
-			
-			if(($SNO % $balk) == 0){
-				&insert_vals($p, $dbh, \@vals);
-				@vals = ();
-			}
-		}
-		close(FD);
-		if($#vals >= 0){
-			&insert_vals($p, $dbh, \@vals);
-		}
+		dp::dp "insert_master; $PARAMS{$pname}, $p->{table_name}\n";
+		&insert_table($p);
 	}
 }
+
 
 #
 #	Load Mater Tables
 #
 $pname = "load_master";
-if($PARAMS{$pname}){
+if(defined $PARAMS{$pname}){
 	dp::dp "load_master\n";
 	foreach my $p (@MASTER_DEFS){
-		next if($PARAMS{$pname} != 1 && $PARAMS{$pname} ne $p->{table_name});
+		next if($PARAMS{$pname} && $PARAMS{$pname} ne $p->{table_name});
 
 		dp::dp "load_master; $PARAMS{$pname}, $p->{table_name}\n";
 		&load_master($p);
 	}
 }
 
+
+#
+#	Reformat Data
+#
 $pname = "reform_csv";
-if($PARAMS{reform_csv}){
+if(defined $PARAMS{reform_csv}){
 	my $target = $PARAMS{reform_csv};
 	foreach my $p (@RECORD_DEFS){
-		next if($PARAMS{$pname} != 1 && $PARAMS{$pname} ne $p->{record_name});
+		next if($PARAMS{$pname} && $PARAMS{$pname} ne $p->{record_name});
 
 		$p->{comvert}->($p);
 	}
 }
-exit;
+
+#
+#	Insert Recors 
+#
+$pname = "insert_csv";
+if(defined $PARAMS{$pname}){
+	dp::dp "insert_csv\n";
+	&load_master();
+	foreach my $p (@RECORD_DEFS){
+		next if($PARAMS{$pname} && $PARAMS{$pname} ne $p->{table_name});
+
+		dp::dp "insert_csv; $PARAMS{$pname}, $p->{table_name}\n";
+		&insert_table($p);
+	}
+}
+
+#
+#	Select 
+#
+$pname = "select";
+if(defined $PARAMS{$pname}){
+	if(! $PARAMS{$pname}){
+		dp::dp "slect need to select table --select RawRecord\n";
+		exit 1;
+	}
+	&load_master();
+	dp::dp "select $PARAMS{$pname}\n" if($DEBUG);
+	foreach my $p (@MASTER_DEFS, @RECORD_DEFS){
+		dp::dp "### select $PARAMS{$pname} : $p->{table_name}\n" if($DEBUG);
+		next if($PARAMS{$pname} && $PARAMS{$pname} ne $p->{table_name});
+
+		dp::dp "### select $p->{table_name}\n" if($DEBUG);
+		&load_table($p, {hash => 0, disp => 2});
+	}
+}
 
 #
 #	Dissconnect the DB
@@ -253,15 +258,65 @@ exit;
 $dbh->disconnect();
 exit 0;
 
+###############################################################
 #
 #	Insert values to Table
+#
+sub	insert_table
+{
+	my($p) = @_;
+
+	my $SNO =  &record_number($dbh, $p->{table_name});
+	my @vals = ();
+	
+	my @strs = ();
+	my @cl = split(/\s*,\s*/, $p->{columns});
+	for(my $i = 0; $i <= $#cl; $i++){
+		dp::dp "[$cl[$i]]\n" if($DEBUG > 1);
+		push(@strs, $i) if($cl[$i] =~ /CHAR|DATE|TIME/i);
+	}
+	dp::dp "STRS: " . join(",", @strs) . "\n";
+	dp::dp "CSV_FILE : $p->{csvf} \n";
+
+	open(FD, $p->{csvf}) || die "Cannot open $p->{csvf}";
+	my $balk = 10;
+	<FD>;
+	while(<FD>){
+		$SNO++;
+		# last if($SNO > 100);
+
+		s/[\r\n]+$//;
+		my @w = split(/,/, $_);
+		if($#w <= 0){
+			dp::dp "Error?: " . $#w . "; $_   $p->{csvf}\n";
+			next;
+		}
+		foreach my $i (@strs){
+			$w[$i-1] = qq{"$w[$i-1]"} // '""';		# val -> "val" for Charcter
+		}
+		my $vs = join(", ", $SNO, @w);
+		dp::dp "[$vs]\n" if($DEBUG > 2);
+		push(@vals,  "($vs)");
+		if(($SNO % $balk) == 0){
+			&insert_vals($p, $dbh, \@vals);
+			@vals = ();
+		}
+	}
+	close(FD);
+	if($#vals >= 0){
+		&insert_vals($p, $dbh, \@vals);
+	}
+}
+
+#
+#
 #
 sub	insert_vals
 {
 	my ($p, $dbh, $valp) = @_;
 
 	my $sql_str = "INSERT INTO  $p->{table_name} VALUES " . join(",", @$valp);
-	dp::dp $sql_str . "\n" if($DEBUG > 1);
+	dp::dp $sql_str . "\n" if($DEBUG > 2);
 	my $sth = $dbh->prepare($sql_str);
 	$sth->execute();
 	$dbh->commit();
@@ -269,6 +324,7 @@ sub	insert_vals
 
 #
 #
+#	Combert Dataformat and genarate CSV file for load
 #
 sub	comv_ccse
 {
@@ -299,6 +355,18 @@ sub	comv_ccse
 	$first_line =~ s/[\r\n]+$//;
 	my $SNO = 0;
 	my ($dsc_area2, $dsc_area1, $dsc_lat, $dsc_long, @dates) = split(/,\s*/, $first_line);
+
+	for(my $i = 0; $i <= $#dates; $i++){
+		my($m,$d, $y) = split(/\//, $dates[$i]);
+		$dates[$i] = sprintf("%04d-%02d-%02d", 2000 + $y, $m, $d);
+	}
+	#	columns => "RecordNo INTEGER, Date DATE, SourceID CHAR(4), KIND CHAR(4),AreaID SMALLINT UNSIGNED, Count INTEGER, AVR7 INTEGER",
+	my @cl = split(/\s*,\s*/, $p->{columns});
+	for(my $i = 0; $i <= $#cl; $i++){
+		$cl[$i] =~ s/\s+.*$//;
+	}
+	print CSV "#" . join(",", @cl) . "\n";
+
 	while(<FD>){
 		s/[\r\n]$//;
 		#"RawRecord", columns => "RecordNo INTEGER, Date DATE, SourceID TINYINT, KIND TINYINT, AreaID SMALLINT, Count INTEGER, AVR7 INTEGER",
@@ -317,7 +385,7 @@ sub	comv_ccse
 		for(my $i = 0; $i <= $#count; $i++){
 			$SNO++;
 			my $v = $count[$i] // "Nan";
-			my $line = join(",", $SNO, $dates[$i], $source, $kind, $area_id, $v, 0);
+			my $line = join(",", $dates[$i], $source, $kind, $area_id, $v, 0);
 			print CSV $line . "\n";
 			dp::dp $line . "\n" if($i < 2); # if($SNO < $DISP_LINES) ;
 		}
@@ -325,7 +393,7 @@ sub	comv_ccse
 	close(FD);
 	close(CSV);
 
-	dp::dp Dumper $mp;
+	#dp::dp Dumper $mp;
 }
 
 #
@@ -335,24 +403,45 @@ sub	load_master
 {
 	my ($p) = @_;
 
-	if(!defined $p){
-		foreach my $p (@MASTER_DEFS){
-			&load_master($p);
-		}
-		return;
+	if(defined $p){
+		return &load_table($p, {hash => 1, disp => 0});
+	}
+	foreach my $p (@MASTER_DEFS){
+		&load_table($p, {hash => 1, disp => 0});
+	}
+	return;
+}
+
+#
+#
+#
+sub	load_table
+{
+	my ($p, $params) = @_;
+
+	my $mp = $p->{hash} // "";
+	%{$mp} = () if($mp);		# clear for recall
+
+	my %dmparam = ();
+	$params = \%dmparam if(!defined $params);
+	dp::dp "load_table $p->{table_name}\n" if($DEBUG);
+	foreach my $k (keys %$params){
+		dp::dp "# params: $k $params->{$k}\n" if($DEBUG);
 	}
 
-	%{$p->{hash}} = ();		# clear for recall
+	#
+	#	Get Item Name from Definition
+	#
 	my @cl = split(/\s*,\s*/, $p->{columns});
 	for(my $i = 0; $i <= $#cl; $i++){
 		$cl[$i] =~ s/\s+.*$//;
 	}
 	#dp::dp "Columns for Query: " . join(",", @cl ) . "\n";
+
+	#
+	#	Execute Query
+	#
 	my $sql_str = "SELECT *  FROM $p->{table_name}";
-	#if($SEARCH_KEY){
-	#	$sql_str .= " WHERE AreaName='$SEARCH_KEY'" ;
-	#	dp::dp $sql_str . "\n";
-	#}
 	my $sth = $dbh->prepare($sql_str);
 	dp::dp $sql_str . "\n" if($VERBOSE || $DEBUG > 2);
 	$sth->execute();
@@ -361,10 +450,10 @@ sub	load_master
 	#	Set Table Information
 	#
 	my @max_len = (0, 0);
-	my $mp = $p->{hash};
 	my $names = $sth->{NAME};
-	my $numFields = $sth->{'NUM_OF_FIELDS'} - 1;
-	my $fnp = $mp->{hash}->{field_names};
+	my $numFields = $sth->{NUM_OF_FIELDS} - 1;
+	$p->{FieldNames} = [];
+	my $fnp = $p->{FiledNames};
 	for my $i (0..$numFields){
 		push(@$fnp, $$names[$i]);
 		$max_len[$i] = 0;
@@ -379,15 +468,17 @@ sub	load_master
 		for my $i (0..$numFields){
 			my $field = $$names[$i];
 			my $v = $$ref[$i];
-			$mp->{$master_key}->{$field} = $v; 
+			$mp->{$master_key}->{$field} = $v if($mp && ($params->{hash} // "")) ;
 			# dp::dp "## $p->{table_name} - $master_key - $field - $v : $mp->{$master_key}->{$field}\n";
+			push(@vals, "$field = $v");
 			if($DEBUG){
 				my $len = length($v);
-				push(@vals, "$field = $v");
 				$max_len[$i] = $len if($len > $max_len[$i]);
 			}
 		}
-		dp::dp "> " . join("\t", $master_key, @vals) . "\n" if($VERBOSE || $DEBUG > 2);
+		print "> " . join("\t", @vals) . "\n" if(($params->{disp} // "") == 1);
+		print join("\t", @$ref) . "\n" if(($params->{disp} // "") == 2);
+		dp::dp "# " . join("\t", $master_key, @vals) . "\n" if($DEBUG > 2);
 	}
 	$sth->finish();
 	dp::dp "MAX_LENGTH: " . join(", ", @max_len[0..$numFields]) . "\n" if($VERBOSE || $DEBUG > 2);
@@ -401,6 +492,7 @@ sub	DO
 {
 	my($dbh, $verbose, $sql_str) = @_;
 	
+	my @result = ();
 	if(!defined $sql_str){
 		my ($package_name, $file_name, $line) = caller;
 		dp::dp "may forgot verbose or sql_str: $file_name #$line\n";
@@ -408,7 +500,7 @@ sub	DO
 	}
 	
 	$verbose = $verbose // "";
-	print "# " .  $sql_str ."\n";
+	dp::dp "# " .  $sql_str ."\n" if($verbose);
 #	my $result = $dbh->do($sql_str);
 #	if(! $result){
 #		print $DBI::errstr
@@ -429,7 +521,24 @@ sub	DO
 		}
 		#print "[$numFields] " . join(" " , @w) . "\n" if($verbose);
 		print "  $rno:" . join(" " , @w) . "\n" if($verbose);
+		push(@result, join(" ", @w));
 		$rno++;
-
 	}
+	return (@result);
 }
+
+#
+#
+#
+sub	record_number
+{
+	my ($dbh, $table_name) = @_;
+
+	my $sql_str = "select TABLE_ROWS from information_schema.tables where table_name = '$table_name'";
+
+	my @res = &DO($dbh, 0, $sql_str);
+	my $row = ($#res < 0) ? 0 : $res[0];
+	#dp::dp "record_namer $table_name : $row \n";
+	return $row;
+}
+
