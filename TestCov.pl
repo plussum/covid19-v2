@@ -1,5 +1,20 @@
 #!/usr/bin/perl
 #
+#	Proto Type of Covid-19 data analysis by mysql
+#
+#	Command Line Paramerts
+#	-params  : set PARASMS{$_} = 1;
+#	--params : set PARASMS{$_} = $ARGV[+1];
+#	
+#	-create_table : Create Tables listed on @MASTER_DEFS and @RECORD_DEFS
+#	-buid_master  : Insert Data and build @MASTER_DEFS
+#	-delete_data  : Delete all datas from @MASTER_DEFS and @RECORD_DEFS
+#	-load_master  : Load Master (This may default, not yet)
+#	-reform_csv   : Reform data srouce format fit to this program
+#	-load_csv	  : load (reformed ) csv to @RECORD_DEFS
+#
+#	./TestCov.pl -create_table -build_master
+#	./TestCov.pl --reform_csv CCSE-NC
 #
 #
 use	strict;
@@ -9,7 +24,8 @@ use DBI;
 use config;
 use dp;
 
-my $DEBUG = 1;
+my $DEBUG = 0;
+my $VERBOSE = 0;
 my $SEARCH_KEY = "";
 
 my $QUERY = 1;
@@ -31,7 +47,7 @@ my @MASTER_DEFS  = (
 			columns => "KindID INTEGER, KindName CHAR(32), KindFullName VARCHAR(256)", },
 );
 my @RECORD_DEFS = (
-	{table_name => "RawRecord", csvf => "$config::WIN_PATH/testdb.csv", csv_src => "$config::CSV_PATH/time_series_covid19_confirmed_global.csv",
+	{record_name => "CCSE-NC", table_name => "RawRecord", csvf => "$config::WIN_PATH/testdb.csv", csv_src => "$config::CSV_PATH/time_series_covid19_confirmed_global.csv",
 		columns => "RecordNo INTEGER, Date DATE, SourceID CHAR(4), KIND CHAR(4),AreaID SMALLINT UNSIGNED, Count INTEGER, AVR7 INTEGER",
 		source => "ccse", kind => "NC", comvert => \&comv_ccse,
 	},
@@ -45,12 +61,11 @@ my @RECORD_DEFS = (
 #	--params : set PARASMS{$_} = $ARGV[+1];
 #
 #
-my @PARAM_NAMES_LIST = qw(create_table insert_data delete_data insert_master reform_csv load_csv);
+my @PARAM_NAMES_LIST = qw(create_table delete_data build_master load_master reform_csv load_csv verbose debug);
 my %PARAM_NAMES = ();
 foreach my $k (@PARAM_NAMES_LIST){
 	$PARAM_NAMES{$k} = 1;
 }
-
 
 #
 #	Argument handling
@@ -58,7 +73,6 @@ foreach my $k (@PARAM_NAMES_LIST){
 my %PARAMS = ();
 for(my $i = 0; $i <= $#ARGV; $i++){
 	$_ = $ARGV[$i];
-	dp::dp "$i: $_\n";
 	if(/-h/){
 		print "usage: $0 " . join(" | ", @PARAM_NAMES_LIST) . "\n";
 		exit 1;
@@ -89,6 +103,26 @@ for(my $i = 0; $i <= $#ARGV; $i++){
 	}
 }
 
+dp::dp %PARAMS . "\n";
+if((keys %PARAMS) <= 0){
+	print "usage: $0 " . join(" | ", @PARAM_NAMES_LIST) . "\n";
+	exit;
+}
+
+foreach my $k (keys %PARAMS){
+	print "PARAMS: $k = $PARAMS{$k} \n";
+}
+
+if(defined $PARAMS{verbose}){
+	$VERBOSE = $PARAMS{verbose};
+}
+	
+if(defined $PARAMS{debug}){
+	$DEBUG = $PARAMS{debug};
+}
+	
+
+
 #
 #	Connect to Database
 #
@@ -96,13 +130,14 @@ my $dbh = DBI->connect($dsn, $user, $password, {RaiseError => 0, AutoCommit =>0}
 #my $dbh = DBI->connect($dsn, $user, $password ) || die $DBI::errstr;
 &DO($dbh, 0, "USE $DB_NAME");
 
-
-
 #
 #	Remove All Data for test
 #
-if($PARAMS{delete_data}){
+my $pname = "delete_data";
+if($PARAMS{$pname}){
 	foreach my $p (@MASTER_DEFS, @RECORD_DEFS){
+		next if(defined $PARAMS{$pname} ne "" && $PARAMS{$pname} ne $p->{table_name});
+
 		&DO($dbh, 0, qq{DELETE FROM $p->{table_name};});
 	}
 }
@@ -110,14 +145,12 @@ if($PARAMS{delete_data}){
 #
 #	Create Table
 #
-if($PARAMS{create_table}){
+$pname = "create_table";
+if($PARAMS{$pname}){
 	&DO($dbh,1, "show tables;");
 	foreach my $p (@MASTER_DEFS, @RECORD_DEFS){
-		#$dbh->do("DROP TABLE IF EXOSTS $p->{table_name}");
-		#$dbh->do("CREATE TABLE $TABLE_NAME (AreaID INTEGER, AreaName CHAR(64), Population INTEGER)");
-		#$dbh->do("CREATE INDEX AreaNameIndex on $TABLE_NAME (AreaName)");
-#
-		#dp::dp "CREATE TABLE $p->{table_name} ($p->{columns})\n";
+		next if($PARAMS{$pname} != 1 && $PARAMS{$pname} ne $p->{table_name});
+
 		&DO($dbh, 0, "DROP TABLE IF EXISTS $p->{table_name}");
 		&DO($dbh, 0, "CREATE TABLE $p->{table_name} ($p->{columns})");
 		&DO($dbh, 1, "SHOW TABLES from $DB_NAME;");
@@ -136,8 +169,11 @@ if($PARAMS{create_table}){
 #
 #	Insert data from pop.csv
 #
-if(defined $PARAMS{insert_master}){
+$pname = "build_master";
+if(defined $PARAMS{$pname}){
 	foreach my $p (@MASTER_DEFS){
+		next if($PARAMS{$pname} != 1 && $PARAMS{$pname} ne $p->{table_name});
+
 		my $SNO = 0;
 		my @vals = ();
 		
@@ -187,12 +223,17 @@ if(defined $PARAMS{insert_master}){
 #
 #	Load Mater Tables
 #
-if($PARAMS{load_master}){
+$pname = "load_master";
+if($PARAMS{$pname}){
 	&load_master();
 }
 
+$pname = "reform_csv";
 if($PARAMS{reform_csv}){
+	my $target = $PARAMS{reform_csv};
 	foreach my $p (@RECORD_DEFS){
+		next if($PARAMS{$pname} != 1 && $PARAMS{$pname} ne $p->{record_name});
+
 		$p->{comvert}->($p);
 	}
 }
@@ -310,10 +351,10 @@ sub	load_master
 					$max_len[$i] = $len if($len > $max_len[$i]);
 				}
 			}
-			dp::dp "> " . join("\t", $master_key, @vals) . "\n" if($DEBUG > 2);
+			dp::dp "> " . join("\t", $master_key, @vals) . "\n" if($VERBOSE || $DEBUG > 1);
 		}
 		$sth->finish();
-		dp::dp "MAX_LENGTH: " . join(", ", @max_len[0..$numFields]) . "\n" if($DEBUG > 2);
+		dp::dp "MAX_LENGTH: " . join(", ", @max_len[0..$numFields]) . "\n" if($VERBOSE || $DEBUG > 1);
 	}
 }
 
