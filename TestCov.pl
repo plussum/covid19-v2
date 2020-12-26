@@ -20,6 +20,7 @@
 use	strict;
 use warnings;
 use DBI;
+use Data::Dumper;
 
 use config;
 use dp;
@@ -27,6 +28,7 @@ use dp;
 my $DEBUG = 0;
 my $VERBOSE = 0;
 my $SEARCH_KEY = "";
+my $DISP_LINES = 50;
 
 my $QUERY = 1;
 
@@ -47,7 +49,7 @@ my @MASTER_DEFS  = (
 			columns => "KindID INTEGER, KindName CHAR(32), KindFullName VARCHAR(256)", },
 );
 my @RECORD_DEFS = (
-	{record_name => "CCSE-NC", table_name => "RawRecord", csvf => "$config::WIN_PATH/testdb.csv", csv_src => "$config::CSV_PATH/time_series_covid19_confirmed_global.csv",
+	{record_name => "CCSE-NC", table_name => "RawRecord", csvf => "testdb.csv", csv_src => "$config::CSV_PATH/time_series_covid19_confirmed_global.csv",
 		columns => "RecordNo INTEGER, Date DATE, SourceID CHAR(4), KIND CHAR(4),AreaID SMALLINT UNSIGNED, Count INTEGER, AVR7 INTEGER",
 		source => "ccse", kind => "NC", comvert => \&comv_ccse,
 	},
@@ -225,7 +227,13 @@ if(defined $PARAMS{$pname}){
 #
 $pname = "load_master";
 if($PARAMS{$pname}){
-	&load_master();
+	dp::dp "load_master\n";
+	foreach my $p (@MASTER_DEFS){
+		next if($PARAMS{$pname} != 1 && $PARAMS{$pname} ne $p->{table_name});
+
+		dp::dp "load_master; $PARAMS{$pname}, $p->{table_name}\n";
+		&load_master($p);
+	}
 }
 
 $pname = "reform_csv";
@@ -272,8 +280,18 @@ sub	comv_ccse
 	my $source_id = $DataSource{$source};
 	my $kind = $p->{kind};
 	my $kind_id = $DataKind{$kind};
+	my $mp = \%AreaInfo;
 
 	my $filed_names = $p->{hash}->{filed_names};
+
+	&load_master();
+	print "-" x 20 . "\n";
+	#print Dumper %AreaInfo;
+	#print Dumper $mp;
+	print "-" x 20 . "\n";
+
+	dp::dp "src: $src\n";
+	dp::dp "dst: $dst\n";
 
 	open(FD, $src) || die "cannot open $src";
 	open(CSV, ">$dst") || die "cannot create $dst";
@@ -284,19 +302,30 @@ sub	comv_ccse
 	while(<FD>){
 		s/[\r\n]$//;
 		#"RawRecord", columns => "RecordNo INTEGER, Date DATE, SourceID TINYINT, KIND TINYINT, AreaID SMALLINT, Count INTEGER, AVR7 INTEGER",
+		if(/"/){	#  ,"Korea, South",3
+			dp::dp substr($_, 0, 100). "\n";
+			s/"([^",]+)(,\s*)([^"]+)"/$1;$3/g;
+			dp::dp substr($_, 0, 100). "\n";
+		}
 		my ($area2, $area1, $lat, $long, @count) = split(/,/, $_);
-		my $area_name = join(";", $area2, $area1);
-		my $area_id = $AreaInfo{$area_name}->{Population} // "-1";
+		my $area_name = ($area2) ? join(";", $area2, $area1) : $area1;
+		my $area_id = $mp->{$area_name}->{AreaID} // -1;
+		dp::dp "[$area_name][" . $mp->{$area_name}->{AreaID} . "]\n";
+		if($area_id == -1){
+			dp::dp "Error at AreaCode : [$area_name]\n";
+		}
 		for(my $i = 0; $i <= $#count; $i++){
-			my $v = $count[$i];
 			$SNO++;
-			my $line = join(",", $SNO, $dates[$i], 0, 0, $area_id, $v, 0);
-			dp::dp $line . "\n";
-			print $line . "\n";
+			my $v = $count[$i] // "Nan";
+			my $line = join(",", $SNO, $dates[$i], $source, $kind, $area_id, $v, 0);
+			print CSV $line . "\n";
+			dp::dp $line . "\n" if($i < 2); # if($SNO < $DISP_LINES) ;
 		}
 	}
 	close(FD);
 	close(CSV);
+
+	dp::dp Dumper $mp;
 }
 
 #
@@ -304,58 +333,64 @@ sub	comv_ccse
 #
 sub	load_master
 {
-	foreach my $p (@MASTER_DEFS){
-		my @cl = split(/\s*,\s*/, $p->{columns});
-		for(my $i = 0; $i <= $#cl; $i++){
-			$cl[$i] =~ s/\s+.*$//;
-		}
-		#dp::dp "Columns for Query: " . join(",", @cl ) . "\n";
-		my $sql_str = "SELECT *  FROM $p->{table_name}";
-		#if($SEARCH_KEY){
-		#	$sql_str .= " WHERE AreaName='$SEARCH_KEY'" ;
-		#	dp::dp $sql_str . "\n";
-		#}
-		my $sth = $dbh->prepare($sql_str);
-		dp::dp $sql_str . "\n";
-		$sth->execute();
+	my ($p) = @_;
 
-		#
-		#	Set Table Information
-		#
-		my @max_len = (0, 0);
-		my $mp = $p->{hash};
-		my $names = $sth->{NAME};
-		my $numFields = $sth->{'NUM_OF_FIELDS'} - 1;
-		my $fnp = $mp->{hash}->{field_names};
-		for my $i (0..$numFields){
-			push(@$fnp, $$names[$i]);
-			$max_len[$i] = 0;
+	if(!defined $p){
+		foreach my $p (@MASTER_DEFS){
+			&load_master($p);
 		}
-
-		#
-		#	Load and Set Table
-		#	
-		while(my $ref = $sth->fetchrow_arrayref()) {
-			my @vals = ();
-			my $master_key = "";			# error
-			for my $i (1..$numFields){
-				my $field = $$names[$i];
-				my $v = $$ref[$i];
-				if($i == 1){
-					$master_key = $v;
-				}
-				$mp->{$master_key}->{$field} = $v if($i > 1);
-				if($DEBUG){
-					my $len = length($v);
-					push(@vals, "$field = $v");
-					$max_len[$i] = $len if($len > $max_len[$i]);
-				}
-			}
-			dp::dp "> " . join("\t", $master_key, @vals) . "\n" if($VERBOSE || $DEBUG > 1);
-		}
-		$sth->finish();
-		dp::dp "MAX_LENGTH: " . join(", ", @max_len[0..$numFields]) . "\n" if($VERBOSE || $DEBUG > 1);
+		return;
 	}
+
+	%{$p->{hash}} = ();		# clear for recall
+	my @cl = split(/\s*,\s*/, $p->{columns});
+	for(my $i = 0; $i <= $#cl; $i++){
+		$cl[$i] =~ s/\s+.*$//;
+	}
+	#dp::dp "Columns for Query: " . join(",", @cl ) . "\n";
+	my $sql_str = "SELECT *  FROM $p->{table_name}";
+	#if($SEARCH_KEY){
+	#	$sql_str .= " WHERE AreaName='$SEARCH_KEY'" ;
+	#	dp::dp $sql_str . "\n";
+	#}
+	my $sth = $dbh->prepare($sql_str);
+	dp::dp $sql_str . "\n" if($VERBOSE || $DEBUG > 2);
+	$sth->execute();
+
+	#
+	#	Set Table Information
+	#
+	my @max_len = (0, 0);
+	my $mp = $p->{hash};
+	my $names = $sth->{NAME};
+	my $numFields = $sth->{'NUM_OF_FIELDS'} - 1;
+	my $fnp = $mp->{hash}->{field_names};
+	for my $i (0..$numFields){
+		push(@$fnp, $$names[$i]);
+		$max_len[$i] = 0;
+	}
+
+	#
+	#	Load and Set Table
+	#	
+	while(my $ref = $sth->fetchrow_arrayref()) {
+		my @vals = ();
+		my $master_key = $$ref[1];			# error
+		for my $i (0..$numFields){
+			my $field = $$names[$i];
+			my $v = $$ref[$i];
+			$mp->{$master_key}->{$field} = $v; 
+			# dp::dp "## $p->{table_name} - $master_key - $field - $v : $mp->{$master_key}->{$field}\n";
+			if($DEBUG){
+				my $len = length($v);
+				push(@vals, "$field = $v");
+				$max_len[$i] = $len if($len > $max_len[$i]);
+			}
+		}
+		dp::dp "> " . join("\t", $master_key, @vals) . "\n" if($VERBOSE || $DEBUG > 2);
+	}
+	$sth->finish();
+	dp::dp "MAX_LENGTH: " . join(", ", @max_len[0..$numFields]) . "\n" if($VERBOSE || $DEBUG > 2);
 }
 
 
