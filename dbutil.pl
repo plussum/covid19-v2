@@ -34,6 +34,7 @@ use Data::Dumper;
 use config;
 use dbinfo;		# DB_NAME, DB_PASSWORD, DB_USER, DB_PORT, WIN_PATH
 use tbdef;
+use dblib;
 use dp;
 
 my $DEBUG = 0;
@@ -52,15 +53,6 @@ my $dsn = "dbi:mysql:database=$DB_NAME;host=localhost;port=$port";
 
 my $AreaName = $tbdef::AreaName;
 
-#
-#	Default Paramers of DO
-#
-my %DISP = (
-	default => {disp_result => 1, disp_line_no => 1, disp_query => 0, disp_name => 0},
-	silent  => {disp_result => 0, disp_line_no => 0, disp_query => 0, disp_name => 0},		# no dislay, use result
-	verbose => {disp_result => 1, disp_line_no => 1, disp_query => 1, disp_name => 0},
-	name    => {disp_result => 1, disp_line_no => 0, disp_query => 0, disp_name => 1},
-);
 
 
 #
@@ -178,20 +170,22 @@ if($DEBUG){
 	}
 }
 
+$dblib::DEBUG = $DEBUG;
+$dblib::VERBOSE = $VERBOSE;
+
 
 #
 #	Connect to Database
 #
 my $dbh = DBI->connect($dsn, $user, $password, {RaiseError => 0, AutoCommit =>0}) || die $DBI::errstr;
-#my $dbh = DBI->connect($dsn, $user, $password ) || die $DBI::errstr;
-&DO($dbh, "USE $DB_NAME", $DISP{silent});
+dblib::DO($dbh, "USE $DB_NAME", $dblib::DISP{silent});
 
 #
 #	Execute instructed functions
 #
 my $table_name = $PARAMS{table_name};
 foreach my $params (@PARAM_NAMES_LIST){
-	next if(! defined $params->{func});		# No function allocated (debug, verbose)
+	next if(! ($params->{func} // ""));		# No function allocated (debug, verbose)
 	
 	my $pname = $params->{name};
 	next if(! defined $PARAMS{$pname});		# Function is not instructed
@@ -199,6 +193,8 @@ foreach my $params (@PARAM_NAMES_LIST){
 	dp::dp "## $params->{name} $table_name\n" if($VERBOSE || $DEBUG);
 	foreach my $p (@tbdef::MASTER_DEFS, @tbdef::RECORD_DEFS){
 		next if($table_name && $p->{table_name} ne $table_name);
+
+		dp::dp "## $params->{name} $params->{func}\n";
 
 		$params->{func}->($p); 		#$p->{comvert}->($p);
 	}
@@ -229,7 +225,7 @@ sub	remove_data
 {
 	my ($p) = @_;
 
-	&DO($dbh, qq{DELETE FROM $p->{table_name};});
+	dblib::DO($dbh, qq{DELETE FROM $p->{table_name};});
 
 	return 1;
 }
@@ -238,8 +234,9 @@ sub	dump_table
 {
 	my ($p) = @_;
 
-	&load_master();
-	&load_table($p, {hash => 0, disp => 2});
+	dp::dp "##### dump_table\n";
+	dblib::load_master($dbh);
+	dblib::load_table($dbh, $p, {hash => 0, disp => 2});
 
 	return 1;
 }
@@ -262,13 +259,13 @@ sub	table_info
 	my $table_name = $p->{table_name};
 	dp::dp "$table_name\n" if($DEBUG);
 
-	my @rows = &DO($dbh, "select TABLE_ROWS from information_schema.tables where table_name = '$table_name';", $DISP{silent});
+	my @rows = dblib::DO($dbh, "select TABLE_ROWS from information_schema.tables where table_name = '$table_name';", $dblib::DISP{silent});
 
 	print "$table_name ( $rows[0]records )\n";
-	&DO($dbh, "select * from INFORMATION_SCHEMA.TABLES where TABLE_SCHEMA='$DB_NAME' and TABLE_NAME='$table_name'", $DISP{name});
+	dblib::DO($dbh, "select * from INFORMATION_SCHEMA.TABLES where TABLE_SCHEMA='$DB_NAME' and TABLE_NAME='$table_name'", $dblib::DISP{name});
 	print "-" x 20 . "\n";
 	my $sql_str = "desc $p->{table_name}";
-	&DO($dbh, "desc $table_name");
+	dblib::DO($dbh, "desc $table_name");
 	print "\n";
 
 	return 1;
@@ -278,10 +275,10 @@ sub	create_table
 {
 	my($p) = @_;
 
-	&DO($dbh, "DROP TABLE IF EXISTS $p->{table_name}", $DISP{verbose});
-	&DO($dbh, "CREATE TABLE $p->{table_name} ($p->{columns})", $DISP{verbose});
-	&DO($dbh, "SHOW TABLES from $DB_NAME;", $DISP{verbose});
-	&DO($dbh, "DESC $p->{table_name};", $DISP{verbose});
+	dblib::DO($dbh, "DROP TABLE IF EXISTS $p->{table_name}", $dblib::DISP{verbose});
+	dblib::DO($dbh, "CREATE TABLE $p->{table_name} ($p->{columns})", $dblib::DISP{verbose});
+	dblib::DO($dbh, "SHOW TABLES from $DB_NAME;", $dblib::DISP{verbose});
+	dblib::DO($dbh, "DESC $p->{table_name};", $dblib::DISP{verbose});
 
 	return 1;
 }
@@ -308,8 +305,8 @@ sub	dump
 {
 	my($p) = @_;
 
-	&load_master();
-	&load_table($p, {hash => 0, disp => 2});
+	dblib::load_master($dbh);
+	dblib::load_table($dbh, $p, {hash => 0, disp => 2});
 
 	return 1;
 }
@@ -322,7 +319,7 @@ sub	insert_table
 {
 	my($p) = @_;
 
-	my $SNO =  &record_number($dbh, $p->{table_name});
+	my $SNO =  dblib::record_number($dbh, $p->{table_name});
 	my @vals = ();
 	
 	my @strs = ();
@@ -393,7 +390,7 @@ sub	comv_ccse
 
 	my $filed_names = $p->{hash}->{filed_names};
 
-	&load_master();
+	dblib::load_master($dbh);
 	print "-" x 20 . "\n";
 	#print Dumper $AreaName;
 	print "-" x 20 . "\n";
@@ -446,167 +443,5 @@ sub	comv_ccse
 	close(CSV);
 
 	#dp::dp Dumper $AreaName;
-}
-
-#
-#	Load Master Tables
-#
-sub	load_master
-{
-	my ($p) = @_;
-
-	if(defined $p){
-		return &load_table($p, {hash => 1, disp => 0});
-	}
-	foreach my $p (@tbdef::MASTER_DEFS){
-		&load_table($p, {hash => 1, disp => 0});
-	}
-	return;
-}
-
-#
-#
-#
-sub	load_table
-{
-	my ($p, $params) = @_;
-
-	dp::dp "# $p->{table_name}  " . ($p->{hash} // "null") . "\n" if($VERBOSE || $DEBUG);
-	my $mp = $p->{hash} // "";
-	%{$mp} = () if($mp);		# clear for recall
-
-	my %dmparam = ();
-	$params = \%dmparam if(!defined $params);
-	dp::dp "load_table $p->{table_name}\n" if($DEBUG);
-	foreach my $k (keys %$params){
-		dp::dp "# params: $k $params->{$k}\n" if($DEBUG);
-	}
-
-	print "TABLE: $p->{table_name}\n" if($params->{disp}//"");
-
-	#
-	#	Get Item Name from Definition
-	#
-	my @cl = split(/\s*,\s*/, $p->{columns});
-	for(my $i = 0; $i <= $#cl; $i++){
-		$cl[$i] =~ s/\s+.*$//;
-	}
-	#dp::dp "Columns for Query: " . join(",", @cl ) . "\n";
-
-	#
-	#	Execute Query
-	#
-	my $sql_str = "SELECT *  FROM $p->{table_name}";
-	my $sth = $dbh->prepare($sql_str);
-	dp::dp $sql_str . "\n" if($VERBOSE || $DEBUG > 2);
-	$sth->execute();
-
-	#
-	#	Set Table Information
-	#
-	my @max_len = (0, 0);
-	my $names = $sth->{NAME};
-	my $numFields = $sth->{NUM_OF_FIELDS} - 1;
-	$p->{FieldNames} = [];
-	my $fnp = $p->{FiledNames};
-	for my $i (0..$numFields){
-		push(@$fnp, $$names[$i]);
-		$max_len[$i] = 0;
-	}
-
-	#
-	#	Load and Set Table
-	#	
-	while(my $ref = $sth->fetchrow_arrayref()) {
-		my @vals = ();
-		my $master_key = $$ref[1];			# error
-		for my $i (0..$numFields){
-			my $field = $$names[$i];
-			my $v = $$ref[$i];
-			$mp->{$master_key}->{$field} = $v if($mp && ($params->{hash} // "")) ;
-			# dp::dp "## $p->{table_name} - $master_key - $field - $v : $mp->{$master_key}->{$field}\n";
-			push(@vals, "$field = $v");
-			if($DEBUG){
-				my $len = length($v);
-				$max_len[$i] = $len if($len > $max_len[$i]);
-			}
-		}
-		print "> " . join("\t", @vals) . "\n" if(($params->{disp} // "") == 1);
-		print join("\t", @$ref) . "\n" if(($params->{disp} // "") == 2);
-		dp::dp "# " . join("\t", $master_key, @vals) . "\n" if($DEBUG > 2);
-	}
-	$sth->finish();
-	dp::dp "MAX_LENGTH: " . join(", ", @max_len[0..$numFields]) . "\n" if($VERBOSE || $DEBUG > 2);
-}
-
-#
-#	Get Record Number of the tabel
-#
-sub	record_number
-{
-	my ($dbh, $table_name) = @_;
-
-	my $sql_str = "select TABLE_ROWS from information_schema.tables where table_name = '$table_name'";
-
-	my @res = &DO($dbh, $sql_str, $DISP{silent});
-	my $row = ($#res < 0) ? 0 : $res[0];
-	#dp::dp "record_namer $table_name : $row \n";
-	return $row;
-}
-
-
-#
-#	Execute Sql Query
-#
-#	default => {disp_result => 1, disp_line_no => 0, disp_query => 0, disp_name => 0},
-#
-sub	DO
-{
-	my($dbh, $sql_str, $disp) = @_;
-	
-	$disp = $disp // $DISP{default};
-
-	if($DEBUG){
-		my ($package_name, $file_name, $line) = caller;
-		dp::dp "Called from: $file_name: $line\n";
-		dp::dp Dumper $disp;
-	}
-
-	dp::dp "# " .  $sql_str ."\n" if($disp->{disp_query} // "" || $DEBUG);
-	my @result = ();
-	if(!defined $sql_str){
-		my ($package_name, $file_name, $line) = caller;
-		dp::dp "may forgot verbose or sql_str: $file_name #$line\n";
-		exit ;
-	}
-	
-#	my $result = $dbh->do($sql_str);
-#	if(! $result){
-#		print $DBI::errstr
-#	}
-
-	my $sth = $dbh->prepare($sql_str);
-	$sth->execute();
-	if(! defined $sth->{NUM_OF_FIELDS}){
-		dp::dp "no result\n" if($disp->{disp_result} // "");
-		return;
-	}
-	my $numFields = $sth->{NUM_OF_FIELDS} - 1;
-	my $names = $sth->{NAME};
-	print join(" ", @$names) . "\n" if($disp->{disp_name} // "");
-
-	my $rno = 0;
-	while(my $row = $sth->fetchrow_arrayref()) {
-		$rno++;
-		my @w = ();
-		for my $i (0..$numFields){
-			push(@w, $$row[$i] // "");
-		}
-		#print "[$numFields] " . join(" " , @w) . "\n" if($verbose);
-		my $rs = (($disp->{disp_line_no} // "" ) ? "$rno: " : "") . join(" " , @w) . "\n";
-		print $rs if($disp->{disp_result} // "" );
-		push(@result, join(" ", @w));
-	}
-	return (@result);
 }
 

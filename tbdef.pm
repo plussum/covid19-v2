@@ -14,6 +14,10 @@ use dbinfo;
 #
 #	MASTER TABLES
 #
+#	01: ID
+#	02: KEY for Reference (join, relation in perl)
+#	03 --- not affect for Reference
+#
 our @MASTER_DEFS  = (
 	{type => "master", table_name => "AreaInfo",   hash => {}, csvf => "$dbinfo::WIN_PATH/pop.csv",
 			columns => "AreaID INTEGER PRIMARY KEY, AreaName VARCHAR(64), Population INTEGER", }, 
