@@ -183,11 +183,11 @@ $dblib::VERBOSE = $VERBOSE;
 my $dbh = DBI->connect($dsn, $user, $password, {RaiseError => 0, AutoCommit =>0}) || die $DBI::errstr;
 dblib::DO($dbh, "USE $DB_NAME", $dblib::DISP{silent});
 
-my $p = $tbdef::RECORD_DEFS[0];
+my $tabledef = $tbdef::RECORD_DEFS[0];
 #dp::dp "### " . Dumper %$p;
 
-#&dump_record($p);
-&draw_graph($p);
+#&dump_record($dbh, $tabledef);
+&draw_graph($dbh, $tabledef);
 
 exit;
 
@@ -196,24 +196,39 @@ exit;
 #
 sub	dump_record
 {
-	my ($p) = @_;
+	my ($dbh, $tabledef) = @_;
 
-	dp::dp "## dump_record [$p]\n";
+	dp::dp "## dump_record [$tabledef]\n";
 	my $params = {hash => 0, disp => 2};
 	my $join = {
 		 AreaID => {table => "AreaInfo", column => "AreaID", },
 	};
 	dblib::load_master($dbh);
-	dblib::load_table($dbh, $p, $params, $join);
+	dblib::load_table($dbh, $tabledef, $params, $join);
 }
 
 
 sub	draw_graph
 {
+	my ($dbh, $tabledef) = @_;
+
+	my $mode = "NC";
 	my $mep = $PARAMS;
+	my $join = {
+		 AreaID => {table => "AreaInfo", column => "AreaID", },
+	};
+	my $load_params = {
+		hash => 0, 
+		disp => 2,
+		query => "SELECT AreaID Dates count FROM $tabledef->{table_name} WHERE Kind = \"$mode\" and Date BETWEEN #DATE_FROM# and #DATE_TILL#",
+	};
 	my $graph_set = {
+		dbh => $dbh,
+		tabledef => $tabledef,
+		load_params => $load_params,
+		join => $join,
 		src => "ccse",			# $DATA_SOURCE,
-		mode => "NC",			# $MODE,
+		mode => $mode,			# $MODE,
 		sub_mode => "COUNT",	# $SUB_MODE,
 		aggr_mode => "DAY",		# $AGGR_MODE,
 

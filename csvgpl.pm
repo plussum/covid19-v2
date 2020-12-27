@@ -266,39 +266,56 @@ sub	csv2graph
 	my @DATA = ();
 	my $DATE_COL_NO = 2;
 
-	#dp::dp "$csvf\n";
-	open(CSV, $csvf) || die "cannot open $csvf";
-	my $cls = <CSV>; 
-	$cls =~ s/,*[\r\n]+$//;
-	for(split(/$DLM/, $cls)){
-		# s#[0-9]{4}/##;
-		push(@DATE_LABEL,  $_);
-	}
-	for(my $i = 0; $i <$DATE_COL_NO; $i++){
-		shift(@DATE_LABEL);
-	}
-	#dp::dp "DATE_LABE:  $#DATE_LABEL: " . join(",", @DATE_LABEL), "\n" ;# if($DEBUG > 2);
+######### CSV
+#	dp::dp "$csvf\n";
+#
+#	open(CSV, $csvf) || die "cannot open $csvf";
+#	my $cls = <CSV>; 
+#	$cls =~ s/,*[\r\n]+$//;
+#	for(split(/$DLM/, $cls)){
+#		# s#[0-9]{4}/##;
+#		push(@DATE_LABEL,  $_);
+#	}
+#	for(my $i = 0; $i <$DATE_COL_NO; $i++){
+#		shift(@DATE_LABEL);
+#	}
+#	#dp::dp "DATE_LABE:  $#DATE_LABEL: " . join(",", @DATE_LABEL), "\n" ;# if($DEBUG > 2);
+#
+#	my $DATE_NUMBER = $#DATE_LABEL;
+#	my $LAST_DATE = $DATE_LABEL[$DATE_NUMBER];
+#	$ext =~ s/#LD#/$LAST_DATE/;
+#
+#	my $l;
+#	for($l = 0; <CSV>; $l++){
+#		chop;
+#		my @w = split(/$DLM/, $_); 
+#		for(my $i = 0; $i <= $#w; $i++){
+#			$DATA[$l][$i] = $w[$i];
+#		}
+#	}
+#	close(CSV);
+#
+######## SQL
+	my $date_from = $gplitem->{start_day} // 0;
+	my $date_till = $gplitem->{end_day} // csvlib::ut2d(time); 
+	my %local_params = %{$graph_set->{load_params}};
+	my $DATE_NUMBER = int((0.99999999 + csvlib::dates2ut($date_till) - csvlib::dates2ut($date_from)) / (24 * 60 * 60));
+	$local_params{query} =~ s/#DATE_FROM#/$date_from/;	
+	$local_params{query} =~ s/#DATE_TILL#/$date_till/;	
 
-	my $DATE_NUMBER = $#DATE_LABEL;
-	my $LAST_DATE = $DATE_LABEL[$DATE_NUMBER];
-	$ext =~ s/#LD#/$LAST_DATE/;
+	my %RESULTS = ();
+	my @RESULT_ITEMS = ();
+	$local_params{result_hash}  = \%RESULTS;
+	$local_params{result_items}  = \@RESULT_ITEMS;
 
-	my $l;
-	for($l = 0; <CSV>; $l++){
-		chop;
-		my @w = split(/$DLM/, $_); 
-		for(my $i = 0; $i <= $#w; $i++){
-			$DATA[$l][$i] = $w[$i];
-		}
-	}
-	close(CSV);
+	dblib::load_table($graph_set->{dbh}, $graph_set->{tabledef}, $graph_set->{load_params}, $graph_set->{join});
 	
-	my $COUNTRY_NUMBER = $l;
+	my $COUNTRY_NUMBER = 99999999;
 
 	if($DEBUG > 1){
 		dp::dp "CSV: DATA\n";
 		dp::dp "     :" , join(",", @DATE_LABEL) , "\n";
-		for($l = 0; $l < 5; $l++){		# $COUNTRY_NUMBER
+		for(my $l = 0; $l < 5; $l++){		# $COUNTRY_NUMBER
 			dp::dp $DATA[$l][0] . ": ";
 			for(my $i = $DATE_COL_NO; $i < $DATE_NUMBER + $DATE_COL_NO; $i++){
 				# print "# " . $i . "  " . $DATE_LABEL[$i-$DATE_COL_NO] .":" ;
@@ -308,6 +325,7 @@ sub	csv2graph
 		}
 		dp::dp "-" x 20 , "\n";
 	}
+	exit;
 
 	#
 	#	Graph Parameter set
@@ -732,9 +750,9 @@ sub	csv2graph
 	$TITLE .= "log " if(defined $gplitem->{logscale});
 	my $XLABEL = "";
 	my $YLABEL = "";
-	my $START_DATE = $DATES[0];
+	my $START_DATE = $date_from;
+	my $LAST_DATE = $date_till;
 	# $LAST_DATE = $DATES[$#DATES];
-	$LAST_DATE = $DATES[$end_day];
 	#dp::dp "LAST_DATE: " . join("," , $LAST_DATE, $end_day, $#DATES) .  "\n";
 	#dp::dp join(",", @DATES) . "\n";
 	if($style eq "boxes"){

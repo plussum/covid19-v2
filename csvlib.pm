@@ -162,6 +162,12 @@ sub	date2ut
 
 	return &ymd2tm($y, $m, $d, $h, $mi, $s);
 } 
+sub	dates2ut
+{
+	my ($dts) = @_;
+	my @w = split(/[-\/ :]/, $dts);
+	return &date2ut(@w);
+}
 
 sub search_list
 {

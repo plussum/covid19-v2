@@ -63,8 +63,16 @@ sub	load_table
 	foreach my $k (keys %$params){
 		dp::dp "# params: $k $params->{$k}\n" if($DEBUG);
 	}
-
 	print "TABLE: $p->{table_name}\n" if($params->{disp}//"");
+
+	#
+	#	Set interface with csvgpl or genlal query
+	#
+	my $result_array = $params->{result_array} // "";
+	my $result_hash = $params->{result_hash} // "";
+	my $result_items = $params->{result_items} // "";
+	# my $label_array  = $params->{label_array} // "";		>> Table definition {FieldNames}
+	my $query = $params->{query}  // "";
 
 	#
 	#	Get Item Name from Definition
@@ -78,7 +86,7 @@ sub	load_table
 	#
 	#	Execute Query
 	#
-	my $sql_str = "SELECT *  FROM $p->{table_name}";
+	my $sql_str = ($query) ? $query : "SELECT *  FROM $p->{table_name}";
 	my $sth = $dbh->prepare($sql_str);
 	dp::dp $sql_str . "\n" if($VERBOSE || $DEBUG > 2);
 	$sth->execute();
@@ -105,6 +113,13 @@ sub	load_table
 			my $refarence = $$ref[1];
 			$mp->{$key} = $refarence;
 		}
+		my $col_number = @$ref - 1;
+		if($result_items){
+			for(my $i = 0; $i <= $col_number; $i++){
+				$result_items->[$i] = {};			
+			}
+		}
+
 		my @vals = ();
 		for my $i (0..$numFields){
 			my $v = $$ref[$i];
@@ -126,6 +141,9 @@ sub	load_table
 				dp::dp "#### $field, $join_table, $join_column $jtp $v -> $vv\n" if($DEBUG > 3);
 				$v = $$ref[$i] = "$vv($v)";
 			}
+			if($result_items){
+				$result_items->[$i]->{$v}++;
+			}
 			push(@vals, "$field = $v");
 			if($DEBUG){
 				my $len = length($v);
@@ -135,6 +153,11 @@ sub	load_table
 		print "> " . join("\t", @vals) . "\n" if(($params->{disp} // "") == 1);
 		print join("\t", @$ref) . "\n" if(($params->{disp} // "") == 2);
 		dp::dp "# " . join("\t", @vals) . "\n" if($DEBUG > 2);
+		push(@$result_array, [@vals]) if($result_array);
+		if($result_hash){
+			my $k = join("\t", @vals[0..($col_number-1)]);
+			$result_hash->{$k} = $vals[$col_number];
+		}
 	}
 	$sth->finish();
 	dp::dp "MAX_LENGTH: " . join(", ", @max_len[0..$numFields]) . "\n" if($VERBOSE || $DEBUG > 2);
