@@ -13,10 +13,10 @@
 #
 #	-create_table	: Create Tables listed on @MASTER_DEFS and @RECORD_DEFS
 #	-buid_master	: Insert Data and build @MASTER_DEFS
-#	-delete_data	: Delete all datas from @MASTER_DEFS and @RECORD_DEFS
 #	-load_master	: Load Master (This may default, not yet)
-#	-reform_csv		: Reform data srouce format fit to this program
+#	-delete_data	: Delete all datas from @MASTER_DEFS and @RECORD_DEFS
 #	-insert_csv		: load (reformed ) csv to @RECORD_DEFS
+#	-reform_csv		: Reform data srouce format fit to this program
 #
 #	Examples
 #	./dbutil..pl -create_table -build_master -reform_csv -insert_csv
@@ -25,13 +25,13 @@
 #	./dbutil..pl DataSource -table_info --debug 2
 #	./dbutil..pl AreaInfo -dump 
 #
-#
+
 use	strict;
 use warnings;
 use DBI;
 use Data::Dumper;
 
-use config;
+#use config;
 use dbinfo;		# DB_NAME, DB_PASSWORD, DB_USER, DB_PORT, WIN_PATH
 use tbdef;
 use dblib;
