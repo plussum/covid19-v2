@@ -46,6 +46,28 @@ sub	load_master
 #
 #
 #
+sub	first_date
+{
+	my ($dbh, $tabledef, $source, $kind, $order) = @_;
+
+	$order = $order // "";
+	$order = "DESC" if($order =~ /^D/i);
+
+	my $sql_str = "SELECT Date FROM $tabledef->{table_name} WHERE Source = \"$source\" AND Kind = \"$kind\" ORDER By Date $order  LIMIT 1 ";
+	#dp::dp $sql_str . "\n";
+	my @result = &DO($dbh, $sql_str, $DISP{silent});
+	dp::dp "#### first_date: Resilt " . join(",", @result) . "\n";
+	return $result[0];
+}
+sub	final_date
+{
+	my ($dbh, $tabledef, $source, $kind, $order) = @_;
+	return &first_date($dbh, $tabledef, $source, $kind, "DESC");
+}
+
+#
+#	Load table, display or set to array/hash
+#
 sub	load_table
 {
 	my ($dbh, $p, $params, $join) = @_;
@@ -107,16 +129,20 @@ sub	load_table
 	#
 	#	Load and Set Table
 	#	
+
+	my $col_number = "";
 	while(my $ref = $sth->fetchrow_arrayref()) {
 		if($p->{type} eq "master"){		# MASTER TABLE Only
 			my $key = $$ref[0];			# error
 			my $refarence = $$ref[1];
 			$mp->{$key} = $refarence;
 		}
-		my $col_number = @$ref - 1;
-		if($result_items){
-			for(my $i = 0; $i <= $col_number; $i++){
-				$result_items->[$i] = {};			
+		if(! $col_number){
+			$col_number = @$ref - 1;
+			if($result_items){
+				for(my $i = 0; $i < $col_number; $i++){
+					$result_items->[$i] = {};			
+				}
 			}
 		}
 
@@ -139,10 +165,12 @@ sub	load_table
 			
 				my $vv = $jtp->{$v};
 				dp::dp "#### $field, $join_table, $join_column $jtp $v -> $vv\n" if($DEBUG > 3);
-				$v = $$ref[$i] = "$vv($v)";
+				#$v = "$vv($v)";
+				$v = "$vv";
+				$$ref[$i] = $v;
 			}
 			if($result_items){
-				$result_items->[$i]->{$v}++;
+				$result_items->[$i]{$v}++ if($i < $numFields);
 			}
 			push(@vals, "$field = $v");
 			if($DEBUG){

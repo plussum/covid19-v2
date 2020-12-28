@@ -20,8 +20,8 @@ use csvgpl;
 #
 #	Initial Values
 #
-my $DEBUG = 3;
-my $VERBOSE = 2;
+my $DEBUG = 2;
+my $VERBOSE = 1;
 my $SEARCH_KEY = "";
 
 #
@@ -76,12 +76,8 @@ my $PARAMS = {			# MODULE PARETER        $mep
 
 	graph_mode => {			# FUNCTION PARAMETER    $funcp
 		NC => [
-	   		{ext => "#KIND# #SRC# 1", start_day => 0,  end_day => 30, lank =>[0, 29] , exclusion => "Others", target => "", label_skip => 3, graph => "lines", term_ysize => 600},
-    		{ext => "#KIND# #SRC# 2", start_day => 0,  end_day => 45, lank =>[0, 29] , exclusion => "Others", target => "", label_skip => 3, graph => "lines", term_ysize => 600},
-	   		{ext => "#KIND# #SRC# 3", start_day => 0,  end_day => 60, lank =>[0, 29] , exclusion => "Others", target => "", label_skip => 3, graph => "lines", term_ysize => 600},
-
-			{ext => "#KIND# Taiwan (#LD#) #SRC#", start_day => 0, lank =>[0, 999], exclusion => $EXCLUSION, target => "Taiwan", label_skip => 3, graph => "lines"},
-			{ext => "#KIND# China (#LD#) #SRC#", start_day => 0,  lank =>[0, 19], exclusion => $EXCLUSION, target => "China", label_skip => 3, graph => "lines"},
+			{ext => "#KIND# all(#LD#) #SRC#", start_day => 0,  lank =>[0, 29] , exclusion => "Others", target => "", label_skip => 7, graph => "lines", avr_date => 7, term_ysize => 400},
+			{ext => "#KIND# all(#LD#) #SRC#", start_day => -60,  lank =>[0, 19] , exclusion => "Others", target => "", label_skip => 7, graph => "lines"},
 		],
 		ND => [
 			{ext => "#KIND# Taiwan (#LD#) #SRC#", start_day => 0, lank =>[0, 999], exclusion => $EXCLUSION, target => "Taiwan", label_skip => 3, graph => "lines"},
@@ -182,6 +178,7 @@ $dblib::VERBOSE = $VERBOSE;
 #
 my $dbh = DBI->connect($dsn, $user, $password, {RaiseError => 0, AutoCommit =>0}) || die $DBI::errstr;
 dblib::DO($dbh, "USE $DB_NAME", $dblib::DISP{silent});
+dblib::load_master($dbh);
 
 my $tabledef = $tbdef::RECORD_DEFS[0];
 #dp::dp "### " . Dumper %$p;
@@ -219,8 +216,8 @@ sub	draw_graph
 	};
 	my $load_params = {
 		hash => 0, 
-		disp => 2,
-		query => "SELECT AreaID Dates count FROM $tabledef->{table_name} WHERE Kind = \"$mode\" and Date BETWEEN #DATE_FROM# and #DATE_TILL#",
+		disp => 0,
+		query => "SELECT Date, AreaID, Count FROM $tabledef->{table_name} WHERE Kind = \"$mode\" and Date BETWEEN \"#DATE_FROM#\" and \"#DATE_TILL#\" ORDER by Date",
 	};
 	my $graph_set = {
 		dbh => $dbh,

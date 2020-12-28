@@ -145,7 +145,7 @@ sub	csvgpl
 		print HTML "<span $class>";
 
 		my $csvf = $clp->{csvf};
-		my $srcf = csvlib::valdef($clp->{src_file}, "");
+		my $srcf = $clp->{src_file} // "";
 		dp::dp $srcf , "\n" if($srcf && $VERBOSE);
 		$csvf =~ s#.*/##;
 		$srcf =~ s#.*/##;
@@ -196,12 +196,15 @@ sub	csv2graph
 	dp::dp join(", ", $gplitem->{ext}, $gplitem->{start_day}, $gplitem->{lank}[0], $gplitem->{lank}[1], $gplitem->{exclusion}, 
 			"[" . $clp->{src} . "]", $mep->{prefix}), "\n" if($VERBOSE);
 	
-	my $src = csvlib::valdefs($gplitem->{src}, "");
+	my $src = $gplitem->{src} // "";
 	my $ext = sprintf("#%02d ", $graph_no) . $mep->{prefix} . " " . $gplitem->{ext};
 	#dp::dp $ext . ":$kind\n";
 	my $mode = $graph_set->{mode};
 	my $sub_mode = $graph_set->{sub_mode};
 	#my $src = $graph_set->{src};
+
+	my $dbh = $graph_set->{dbh};
+	my $tabledef = $graph_set->{tabledef};
 
 	$ext =~ s/#KIND#/$kind/;
 	$ext =~ s/#SRC#/$src/;
@@ -296,33 +299,61 @@ sub	csv2graph
 #	close(CSV);
 #
 ######## SQL
+	my $first_date_str = dblib::first_date($dbh, $tabledef, $graph_set->{src}, $graph_set->{mode});
+	my $final_date_str = dblib::final_date($dbh, $tabledef, $graph_set->{src}, $graph_set->{mode});
+	my $first_date = csvlib::date2ut($first_date_str);
+	my $final_date = csvlib::date2ut($final_date_str);
+
+
 	my $date_from = $gplitem->{start_day} // 0;
-	my $date_till = $gplitem->{end_day} // csvlib::ut2d(time); 
+	my $date_till = $gplitem->{end_day} // 0;
+
+	dp::dp "Date: $date_from, $date_till\n";
+
+	$date_till = $final_date if($date_till == 0);
+	$date_from = $first_date if($date_from == 0);
+	
+	$date_from = $final_date + $date_from * 60 * 60 if($date_from =~ /^[-]?[^\d]+$/);
+	$date_till = $date_from + $date_till * 60 * 60 if($date_till =~ /^[+]?[^\d]+$/);
+
+	my $date_from_str = csvlib::ut2d($date_from, "-");
+	my $date_till_str = csvlib::ut2d($date_till, "-");
+	my $DATE_NUMBER = int((0.99999999 + $date_till - $date_from) / (24 * 60 * 60));
+
+	dp::dp "Date: " . join(",", $date_from, $date_till, $date_from_str, $date_till_str) . "\n";
 	my %local_params = %{$graph_set->{load_params}};
-	my $DATE_NUMBER = int((0.99999999 + csvlib::dates2ut($date_till) - csvlib::dates2ut($date_from)) / (24 * 60 * 60));
-	$local_params{query} =~ s/#DATE_FROM#/$date_from/;	
-	$local_params{query} =~ s/#DATE_TILL#/$date_till/;	
+	dp::dp "Query: $local_params{query}\n";
+	$local_params{query} =~ s/#DATE_FROM#/$date_from_str/;	
+	$local_params{query} =~ s/#DATE_TILL#/$date_till_str/;	
+	dp::dp "Query: $local_params{query}\n";
+
+	my $START_DATE = $date_from;
+	my $LAST_DATE = $date_till;
+	# $LAST_DATE = $DATES[$#DATES];
+	#dp::dp "LAST_DATE: " . join("," , $LAST_DATE, $end_day, $#DATES) .  "\n";
+	#dp::dp join(",", @DATES) . "\n";
+	if($style eq "boxes"){
+		$START_DATE = &date_offset($START_DATE, -24 * 60 * 60);
+		$LAST_DATE  = &date_offset($LAST_DATE,   24 * 60 * 60);
+	}
 
 	my %RESULTS = ();
 	my @RESULT_ITEMS = ();
 	$local_params{result_hash}  = \%RESULTS;
 	$local_params{result_items}  = \@RESULT_ITEMS;
 
-	dblib::load_table($graph_set->{dbh}, $graph_set->{tabledef}, $graph_set->{load_params}, $graph_set->{join});
+	dblib::load_table($graph_set->{dbh}, $graph_set->{tabledef}, \%local_params, $graph_set->{join});
 	
 	my $COUNTRY_NUMBER = 99999999;
 
 	if($DEBUG > 1){
 		dp::dp "CSV: DATA\n";
-		dp::dp "     :" , join(",", @DATE_LABEL) , "\n";
-		for(my $l = 0; $l < 5; $l++){		# $COUNTRY_NUMBER
-			dp::dp $DATA[$l][0] . ": ";
-			for(my $i = $DATE_COL_NO; $i < $DATE_NUMBER + $DATE_COL_NO; $i++){
-				# print "# " . $i . "  " . $DATE_LABEL[$i-$DATE_COL_NO] .":" ;
-				print $DATA[$l][$i] , ",";
-			}
-			print "\n";
+		#dp::dp "     :" , join(",", @DATE_LABEL) , "\n";
+		#dp::dp "### ITEMS : " . join(",", keys %RESULTS) . "\n";
+		foreach my $k (@RESULT_ITEMS){
+			dp::dp "### RESULT: $k " . join(",", keys %$k) . "\n";
 		}
+
 		dp::dp "-" x 20 , "\n";
 	}
 	exit;
@@ -750,15 +781,6 @@ sub	csv2graph
 	$TITLE .= "log " if(defined $gplitem->{logscale});
 	my $XLABEL = "";
 	my $YLABEL = "";
-	my $START_DATE = $date_from;
-	my $LAST_DATE = $date_till;
-	# $LAST_DATE = $DATES[$#DATES];
-	#dp::dp "LAST_DATE: " . join("," , $LAST_DATE, $end_day, $#DATES) .  "\n";
-	#dp::dp join(",", @DATES) . "\n";
-	if($style eq "boxes"){
-		$START_DATE = &date_offset($START_DATE, -24 * 60 * 60);
-		$LAST_DATE  = &date_offset($LAST_DATE,   24 * 60 * 60);
-	}
 
 	my $DATE_FORMAT = "set xdata time\nset timefmt '%m/%d'\nset format x '%m/%d'\n";
 	my $XRANGE = "set xrange ['$START_DATE':'$LAST_DATE']";
@@ -766,6 +788,7 @@ sub	csv2graph
 		$DATE_FORMAT = "";
 		$XRANGE = "set xrange [1:" . $final_rec . "]";
 	}
+
 	my $TERM_XSIZE = csvlib::valdef($gplitem->{term_xsize}, 1000) ;
 	my $TERM_YSIZE = csvlib::valdef($gplitem->{term_ysize}, 300);
 

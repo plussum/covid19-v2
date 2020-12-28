@@ -115,7 +115,8 @@ sub ymd2tm
 {
 	my ($y, $m, $d, $h, $mn, $s) = @_;
 
-	#print "ymd2tm: " . join("/", @_), "\n";
+	#&disp_caller(1,2,3,4,5);
+	#dp::dp "ymd2tm: " . join("/", @_), "\n";
 
 	#$y -= 2100 if($y > 2100);
 	my $tm = timelocal($s, $mn, $h, $d, $m - 1, $y);
@@ -143,31 +144,28 @@ sub ymds2tm
 #
 sub	date2ut
 {
-	my ($dt, $dlm, $yn, $mn, $dn, $hn, $mnn, $sn) = @_;
+	my ($dt, $dlm, @order) = @_;
 
-	my @w = split(/$dlm/, $dt);
-	my ($y, $m, $d, $h, $mi, $s) = ();
-	
-	$y = &valdef($w[$yn], 0);
-	$m = &valdef($w[$mn], 0);
-	$d = &valdef($w[$dn], 0);
-
-	if(! defined $hn){
-		return &ymd2tm($y, $m, $d, 0, 0, 0);
+	#&disp_caller(1,2,3,4,5);
+	$dlm = $dlm // "[\-\/\: ]";
+	#dp::dp "date2ut $dt, $dlm\n";
+	if($#order < 0){
+		@order = (0, 1, 2, 3, 4, 5, 6);
 	}
-
-	$h  = &valdef($w[$hn], 0);
-	$mi = &valdef($w[$mnn], 0);
-	$s  = &valdef($w[$sn], 0);
-
-	return &ymd2tm($y, $m, $d, $h, $mi, $s);
+	my @w = split(/$dlm/, $dt);
+	#dp::dp "#### " . join(",", @w) . "\n";
+	
+	my (@ymdhms) = (0,0,0,0,0,0);
+	for(my $i = 0; $i <= $#w; $i++){
+		if(defined $order[$i]){
+			my $n = $order[$i];
+			$ymdhms[$i] = $w[$n] // 0;
+			#dp::dp "### [$i][$n] $w[$i] $ymdhms[$i]\n";
+		}
+	}
+	dp::dp "date2ut $dt, $dlm, " . join("," , @ymdhms) . "\n";
+	return &ymd2tm(@ymdhms);
 } 
-sub	dates2ut
-{
-	my ($dts) = @_;
-	my @w = split(/[-\/ :]/, $dts);
-	return &date2ut(@w);
-}
 
 sub search_list
 {
@@ -585,4 +583,14 @@ sub	num
 	return ($v);
 }
 
+sub	disp_caller
+{
+	my @level = @_;
+
+	@level = (0..1) if($#level < 0);
+	foreach my $i (@level){
+		my ($package_name, $file_name, $line) = caller($i);
+		print "called from[$i]: $package_name :: $file_name #$line\n";
+	}
+}
 1;
